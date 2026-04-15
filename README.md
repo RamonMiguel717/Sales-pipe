@@ -1,147 +1,235 @@
 # Sales_pipe
 
-## Visão Geral
+## Visao Geral
 
-A `Sales_pipe` é um projeto de Engenharia e Análise de Dados que usa um conjunto de tabelas de e-commerce como base para estudar ingestão, organização de dados, modelagem analítica e construção de indicadores de negócio.
+`Sales_pipe` e um projeto de Analytics Engineering voltado para transformar um datalake relacional em uma camada analitica pronta para banco de dados e BI.
 
-O projeto parte de um cenário próximo do mundo real: os dados chegam fragmentados em múltiplos arquivos CSV relacionados entre si, funcionando como um pequeno datalake relacional. A proposta da `Sales_pipe` é transformar esse conjunto de tabelas em uma base confiável para exploração, consultas SQL, limpeza, modelagem e construção de KPIs.
+O projeto usa as tabelas do dataset Olist como base e organiza o fluxo em tres camadas:
 
-Hoje o foco principal está em três frentes:
+- `bronze`: dados brutos da origem
+- `silver`: dados tratados e padronizados
+- `gold`: tabelas analiticas para consumo no BI
 
-- organizar a entrada dos dados
-- entender os relacionamentos entre as tabelas
-- criar uma base sólida para análises de vendas, entrega, pagamentos e comportamento operacional
+A ideia central e sair da exploracao em notebook e evoluir para uma pipeline simples, relacional e reproduzivel, com persistencia em MySQL e consumo final no Metabase.
 
-## Objetivo do Projeto
+## Objetivo
 
-O objetivo da `Sales_pipe` não é apenas carregar arquivos, mas evoluir para uma pipeline analítica com visão de produto de dados. Isso significa sair de arquivos soltos e caminhar para um fluxo mais estruturado, onde seja possível:
+O objetivo da `Sales_pipe` e consolidar um fluxo em que os dados:
 
-- carregar tabelas de forma padronizada
-- preservar os relacionamentos por chaves de negócio
-- trabalhar com essas tabelas em SQL
-- testar hipóteses no notebook antes de consolidar regras no código
-- transformar análises exploratórias em funções reutilizáveis
+1. entram por arquivos CSV relacionados entre si
+2. sao organizados em tabelas consistentes
+3. passam por tratamento e enriquecimento
+4. sao modelados para analise
+5. podem ser persistidos em MySQL
+6. ficam prontos para visualizacao no Metabase
 
-Em outras palavras, o notebook é o espaço de descoberta, enquanto a `pipe` tende a se tornar o espaço de padronização e produção.
+O notebook continua como camada de descoberta. A `pipe` e onde as regras deixam de ser exploratorias e passam a ser reutilizaveis.
 
-## Estado Atual
+## Arquitetura Atual
 
-No estágio atual, o projeto já possui:
+Hoje o projeto trabalha com um desenho enxuto de ELT:
 
-- uma camada de entrada de dados em `data/entry`
-- uma `pipe` que carrega as tabelas do datalake e expõe seus relacionamentos
-- um notebook de análise para exploração inicial, limpeza e definição de métricas
-- utilitários para leitura de múltiplos formatos e descoberta de arquivos
+- `Bronze`: replica das tabelas brutas da origem
+- `Silver`: consolidacao e tratamento dos dados operacionais
+- `Gold`: dimensoes, fatos e agregados para analise
 
-Atualmente a direção do projeto está mais orientada para **tabelas relacionais e consultas SQL** do que para um único dataframe final achatado. Essa escolha deixa o projeto mais próximo de cenários reais de engenharia, onde diferentes entidades precisam ser preservadas antes de qualquer consolidação analítica.
+As transformacoes principais sao feitas em SQL em memoria, o que reduz a quantidade de `merge` manuais em pandas e deixa a logica mais proxima de um fluxo relacional real.
 
 ## Estrutura do Projeto
 
 ```text
 Sales_pipe/
-├── core/
-│   ├── getters.py
-│   ├── input_resolver.py
-│   └── paths.py
-├── pipe/
-│   └── sales.py
-├── data/
-│   ├── entry/
-│   └── exit/
-├── Analise.ipynb
-└── Anotações.md
+|-- core/
+|   |-- database.py
+|   |-- getters.py
+|   |-- mysql_schema.py
+|   `-- paths.py
+|-- pipe/
+|   `-- sales.py
+|-- data/
+|   |-- entry/
+|   `-- exit/
+|-- Analise.ipynb
+|-- Anotacoes.md
+|-- .env
+`-- README.md
 ```
 
-### Papel de cada parte
+## Fonte de Dados
 
-- `core/getters.py`: centraliza a leitura de arquivos e o suporte a diferentes formatos.
-- `core/input_resolver.py`: ajuda a localizar arquivos automaticamente em diretórios.
-- `core/paths.py`: concentra os caminhos principais do projeto.
-- `pipe/sales.py`: carrega as tabelas da camada de entrada e expõe os relacionamentos entre elas.
-- `Analise.ipynb`: ambiente de exploração, prototipagem de tratamentos, testes de joins e definição de KPIs.
+As tabelas de origem atuais sao:
 
-## Tabelas Trabalhadas
+- `customers`
+- `geolocation`
+- `orders`
+- `order_items`
+- `order_payments`
+- `order_reviews`
+- `products`
+- `sellers`
+- `translation`
 
-O projeto está usando um conjunto de tabelas relacionadas do domínio de vendas, incluindo:
+Relacoes principais:
 
-- pedidos
-- itens de pedido
-- pagamentos
-- clientes
-- produtos
-- vendedores
-- reviews
-- geolocalização
-- tradução de categoria de produto
+- `orders.customer_id -> customers.customer_id`
+- `order_items.order_id -> orders.order_id`
+- `order_items.product_id -> products.product_id`
+- `order_items.seller_id -> sellers.seller_id`
+- `order_payments.order_id -> orders.order_id`
+- `order_reviews.order_id -> orders.order_id`
+- `products.product_category_name -> translation.product_category_name`
+- `customers.customer_zip_code_prefix -> geolocation.geolocation_zip_code_prefix`
+- `sellers.seller_zip_code_prefix -> geolocation.geolocation_zip_code_prefix`
 
-Essas tabelas se relacionam principalmente por chaves como:
+## Camadas da Pipe
 
-- `order_id`
-- `customer_id`
-- `product_id`
-- `seller_id`
-- `product_category_name`
-- prefixos de CEP
+### Bronze
 
-Esse desenho torna o projeto especialmente útil para estudar modelagem relacional, joins, agregações e construção de camadas analíticas.
+Replica os dados brutos da origem em tabelas com prefixo `bronze_`:
 
-## Exemplos de Análises e KPIs Esperados
+- `bronze_customers`
+- `bronze_geolocation`
+- `bronze_orders`
+- `bronze_order_items`
+- `bronze_order_payments`
+- `bronze_order_reviews`
+- `bronze_products`
+- `bronze_sellers`
+- `bronze_translation`
 
-Pelo material já explorado no notebook, a `Sales_pipe` caminha para gerar indicadores como:
+### Silver
 
-- ticket médio
-- valor médio de frete
-- faturamento histórico
-- tendência temporal de vendas
-- tempo médio de entrega
+Padroniza e trata os dados operacionais em tabelas com prefixo `silver_`:
+
+- `silver_geolocations`
+- `silver_product_categories`
+- `silver_customers`
+- `silver_sellers`
+- `silver_products`
+- `silver_orders`
+- `silver_order_items`
+- `silver_order_payments`
+- `silver_order_reviews`
+
+Regras relevantes da camada Silver:
+
+- consolidacao de geolocalizacao por CEP
+- media para `latitude` e `longitude`
+- moda para `cidade` e `estado`
+- ajuste de tipagem e arredondamento de valores monetarios
+
+### Gold
+
+Entrega a camada analitica com prefixo `gold_`:
+
+- `gold_dim_customers`
+- `gold_dim_products`
+- `gold_dim_sellers`
+- `gold_fct_orders`
+- `gold_fct_order_items`
+- `gold_agg_sales_monthly`
+
+Essa e a camada pensada para MySQL e consumo no Metabase.
+
+## O Que a Pipe Entrega Hoje
+
+Quando voce roda `principal()`, a saida padrao e a camada Gold em formato de DataFrame:
+
+- `gold_dim_customers`
+- `gold_dim_products`
+- `gold_dim_sellers`
+- `gold_fct_orders`
+- `gold_fct_order_items`
+- `gold_agg_sales_monthly`
+
+Quando voce roda a carga para MySQL, a pipeline monta e persiste as tres camadas.
+
+## Principais Metricas Disponiveis
+
+A camada Gold ja entrega campos uteis para KPI como:
+
+- faturamento total
+- ticket medio
+- frete medio
+- tempo medio de entrega
 - atraso de entrega
-- OTD (On Time Delivery)
+- OTD (`otd_rate`)
+- review medio
 - comportamento de pagamento
 
-Esses indicadores podem ser evoluídos tanto por consultas SQL quanto por funções da própria pipeline.
+## Integracao com MySQL
+
+O projeto ja possui:
+
+- criacao automatica do database, se ele nao existir
+- criacao das tabelas Bronze, Silver e Gold
+- tipagem definida no schema
+- carga full refresh controlada para evitar duplicacao em novas execucoes
+
+As variaveis ficam em [`.env`](/C:/Users/ramon/OneDrive/Desktop/estudos/Data_analysis/Sales_pipe/.env):
+
+```env
+MYSQL_HOST=
+MYSQL_PORT=3306
+MYSQL_DATABASE=
+MYSQL_USER=
+MYSQL_PASSWORD=
+MYSQL_DRIVER=pymysql
+MYSQL_ECHO=false
+```
+
+## Como Usar
+
+Retornar a camada Gold para analise:
+
+```python
+from pipe.sales import principal
+
+tables = principal()
+orders = tables["gold_fct_orders"]
+```
+
+Persistir Bronze, Silver e Gold no MySQL:
+
+```python
+from pipe.sales import load_mysql_elt_tables
+
+load_mysql_elt_tables()
+```
+
+Ou usar a mesma `principal()` e, ao mesmo tempo, gravar no banco:
+
+```python
+from pipe.sales import principal
+
+gold_tables = principal(persist_mysql=True)
+```
 
 ## Pontos Fortes
 
-- Usa um caso próximo do mundo real, com múltiplas tabelas e relacionamentos reais.
-- Já nasce com separação entre entrada de dados, lógica da pipeline e ambiente de análise.
-- Permite explorar o dado no notebook antes de transformar regras em código reutilizável.
-- Mantém o projeto aberto para evoluir de CSVs para um fluxo relacional mais maduro.
-- Tem potencial claro para servir como portfólio de Engenharia de Dados, ETL e Analytics Engineering.
+- Mantem o projeto orientado a Analytics Engineering, sem estrutura pesada demais.
+- Usa notebook para descoberta e pipeline para consolidacao.
+- Trabalha com dados relacionais proximos de um cenario real.
+- Ja separa dados em `bronze`, `silver` e `gold`.
+- Ja esta preparado para persistencia em MySQL.
+- Ja produz camada final adequada para BI.
 
 ## Pontos de Melhoria
 
-- Formalizar um banco relacional local, como SQLite, para consolidar a etapa SQL.
-- Criar uma camada de transformação com regras versionadas e reutilizáveis.
-- Padronizar melhor nomes de colunas, encoding e convenções de nomenclatura.
-- Adicionar validações automáticas para integridade das chaves entre tabelas.
-- Criar testes para garantir que mudanças na pipeline não quebrem relações importantes.
-- Persistir saídas analíticas intermediárias em vez de depender apenas do notebook.
-- Organizar melhor o fluxo entre exploração, tratamento e produção.
+- Separar as queries SQL da pipe em arquivos `.sql`.
+- Adicionar testes de qualidade de dados entre as camadas.
+- Criar uma rotina unica de execucao da pipeline.
+- Refinar estrategia de carga incremental quando o projeto evoluir.
+- Documentar melhor cada tabela final para uso no Metabase.
+- Adicionar `docker-compose` para MySQL + Metabase.
 
-## Para Onde o Projeto Está Indo
+## Direcao do Projeto
 
-A tendência natural da `Sales_pipe` é evoluir de um projeto exploratório para uma pequena plataforma analítica local. O caminho mais coerente, olhando o estado atual do notebook e da `pipe`, é:
+O projeto esta caminhando para uma stack local e simples de Analytics Engineering:
 
-1. consolidar as tabelas em ambiente SQL
-2. validar joins, métricas e regras no notebook
-3. transformar essas regras em funções estáveis na pipeline
-4. gerar tabelas analíticas ou marts voltados para KPI
-5. preparar o projeto para consultas, dashboards ou automações futuras
+1. datalake em CSV
+2. transformacao em camadas Bronze, Silver e Gold
+3. persistencia em MySQL
+4. visualizacao no Metabase
 
-Esse direcionamento faz com que a `Sales_pipe` deixe de ser apenas um estudo com CSVs e passe a ser um projeto de estruturação analítica com foco em clareza, reprodutibilidade e evolução incremental.
-
-## Exemplo de Uso Atual
-
-Hoje a `pipe` pode ser usada para carregar as tabelas brutas do datalake:
-
-```python
-from pipe.sales import principal, get_relationships
-
-tables = principal()
-relationships = get_relationships()
-
-orders = tables["orders"]
-order_items = tables["order_items"]
-```
-
-Esse fluxo reforça a ideia central do projeto neste momento: primeiro entender e organizar as entidades relacionais, depois consolidar as análises.
+O foco nao e virar um projeto de engenharia de software pesado. O foco e construir uma pipeline analitica clara, util e pronta para responder perguntas de negocio.

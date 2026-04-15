@@ -6,6 +6,15 @@ import pandas as pd
 from core import paths
 from core.database import get_mysql_engine
 from core.getters import Getters
+from core.mysql_schema import (
+    BRONZE_TABLE_ORDER,
+    GOLD_TABLE_ORDER,
+    LAYER_TABLE_ORDER,
+    SILVER_TABLE_ORDER,
+    clear_layered_tables,
+    create_layered_schema,
+    load_dataframe,
+)
 
 
 TABLE_FILES = {
@@ -49,15 +58,15 @@ DATETIME_COLUMNS = {
 }
 
 
-ANALYTICS_PARSE_DATES = {
-    "fct_orders": [
+GOLD_PARSE_DATES = {
+    "gold_fct_orders": [
         "order_purchase_timestamp",
         "order_approved_at",
         "order_delivered_carrier_date",
         "order_delivered_customer_date",
         "order_estimated_delivery_date",
     ],
-    "fct_order_items": [
+    "gold_fct_order_items": [
         "shipping_limit_date",
         "order_purchase_timestamp",
         "order_delivered_carrier_date",
@@ -67,57 +76,13 @@ ANALYTICS_PARSE_DATES = {
 }
 
 
-ANALYTICS_BOOL_COLUMNS = {
-    "fct_orders": ["is_delivered_late", "has_review_comment"],
-    "fct_order_items": ["is_delivered_late"],
+GOLD_BOOL_COLUMNS = {
+    "gold_fct_orders": ["is_delivered_late", "has_review_comment"],
+    "gold_fct_order_items": ["is_delivered_late"],
 }
 
 
-# Para CEP, latitude e longitude funcionam melhor como centroide médio;
-# para cidade e estado, a moda é mais consistente por serem variáveis categóricas.
 SQL_TRANSFORM_SCRIPT = """
-CREATE TEMP TABLE geolocation_prepared AS
-WITH geolocation_centroid AS (
-    SELECT
-        geolocation_zip_code_prefix,
-        AVG(geolocation_lat) AS geolocation_lat,
-        AVG(geolocation_lng) AS geolocation_lng
-    FROM geolocation
-    GROUP BY geolocation_zip_code_prefix
-),
-geolocation_mode AS (
-    SELECT
-        geolocation_zip_code_prefix,
-        geolocation_city,
-        geolocation_state
-    FROM (
-        SELECT
-            geolocation_zip_code_prefix,
-            geolocation_city,
-            geolocation_state,
-            COUNT(*) AS occurrences,
-            ROW_NUMBER() OVER (
-                PARTITION BY geolocation_zip_code_prefix
-                ORDER BY COUNT(*) DESC, geolocation_city, geolocation_state
-            ) AS row_num
-        FROM geolocation
-        GROUP BY
-            geolocation_zip_code_prefix,
-            geolocation_city,
-            geolocation_state
-    )
-    WHERE row_num = 1
-)
-SELECT
-    centroid.geolocation_zip_code_prefix,
-    centroid.geolocation_lat,
-    centroid.geolocation_lng,
-    mode.geolocation_city,
-    mode.geolocation_state
-FROM geolocation_centroid AS centroid
-LEFT JOIN geolocation_mode AS mode
-    ON centroid.geolocation_zip_code_prefix = mode.geolocation_zip_code_prefix;
-
 CREATE TEMP TABLE payments_prepared AS
 WITH payment_type_rank AS (
     SELECT
@@ -179,37 +144,37 @@ SELECT
 FROM order_items_prepared
 GROUP BY order_id;
 
-CREATE TEMP TABLE dim_customers_sql AS
+CREATE TEMP TABLE gold_dim_customers_sql AS
 SELECT
     customers.*,
-    geolocation_prepared.geolocation_lat AS customer_lat,
-    geolocation_prepared.geolocation_lng AS customer_lng,
-    geolocation_prepared.geolocation_city AS customer_geo_city,
-    geolocation_prepared.geolocation_state AS customer_geo_state
+    geolocations.latitude AS customer_lat,
+    geolocations.longitude AS customer_lng,
+    geolocations.city AS customer_geo_city,
+    geolocations.state AS customer_geo_state
 FROM customers
-LEFT JOIN geolocation_prepared
-    ON customers.customer_zip_code_prefix = geolocation_prepared.geolocation_zip_code_prefix;
+LEFT JOIN geolocations
+    ON customers.customer_zip_code_prefix = geolocations.zip_code_prefix;
 
-CREATE TEMP TABLE dim_sellers_sql AS
+CREATE TEMP TABLE gold_dim_sellers_sql AS
 SELECT
     sellers.*,
-    geolocation_prepared.geolocation_lat AS seller_lat,
-    geolocation_prepared.geolocation_lng AS seller_lng,
-    geolocation_prepared.geolocation_city AS seller_geo_city,
-    geolocation_prepared.geolocation_state AS seller_geo_state
+    geolocations.latitude AS seller_lat,
+    geolocations.longitude AS seller_lng,
+    geolocations.city AS seller_geo_city,
+    geolocations.state AS seller_geo_state
 FROM sellers
-LEFT JOIN geolocation_prepared
-    ON sellers.seller_zip_code_prefix = geolocation_prepared.geolocation_zip_code_prefix;
+LEFT JOIN geolocations
+    ON sellers.seller_zip_code_prefix = geolocations.zip_code_prefix;
 
-CREATE TEMP TABLE dim_products_sql AS
+CREATE TEMP TABLE gold_dim_products_sql AS
 SELECT
     products.*,
-    translation.product_category_name_english
+    product_categories.product_category_name_english
 FROM products
-LEFT JOIN translation
-    ON products.product_category_name = translation.product_category_name;
+LEFT JOIN product_categories
+    ON products.product_category_name = product_categories.product_category_name;
 
-CREATE TEMP TABLE fct_orders_sql AS
+CREATE TEMP TABLE gold_fct_orders_sql AS
 SELECT
     orders.*,
     order_items_summary.items_count,
@@ -250,27 +215,27 @@ LEFT JOIN payments_prepared
 LEFT JOIN reviews_prepared
     ON orders.order_id = reviews_prepared.order_id;
 
-CREATE TEMP TABLE fct_order_items_sql AS
+CREATE TEMP TABLE gold_fct_order_items_sql AS
 SELECT
     order_items_prepared.*,
-    fct_orders_sql.customer_id,
-    fct_orders_sql.order_status,
-    fct_orders_sql.order_purchase_timestamp,
-    fct_orders_sql.order_delivered_carrier_date,
-    fct_orders_sql.order_delivered_customer_date,
-    fct_orders_sql.order_estimated_delivery_date,
-    fct_orders_sql.purchase_year,
-    fct_orders_sql.purchase_month,
-    fct_orders_sql.purchase_year_month,
-    fct_orders_sql.delivery_days,
-    fct_orders_sql.delivery_delay_days,
-    fct_orders_sql.is_delivered_late,
-    julianday(order_items_prepared.shipping_limit_date) - julianday(fct_orders_sql.order_delivered_carrier_date) AS shipping_accuracy_days
+    gold_fct_orders_sql.customer_id,
+    gold_fct_orders_sql.order_status,
+    gold_fct_orders_sql.order_purchase_timestamp,
+    gold_fct_orders_sql.order_delivered_carrier_date,
+    gold_fct_orders_sql.order_delivered_customer_date,
+    gold_fct_orders_sql.order_estimated_delivery_date,
+    gold_fct_orders_sql.purchase_year,
+    gold_fct_orders_sql.purchase_month,
+    gold_fct_orders_sql.purchase_year_month,
+    gold_fct_orders_sql.delivery_days,
+    gold_fct_orders_sql.delivery_delay_days,
+    gold_fct_orders_sql.is_delivered_late,
+    julianday(order_items_prepared.shipping_limit_date) - julianday(gold_fct_orders_sql.order_delivered_carrier_date) AS shipping_accuracy_days
 FROM order_items_prepared
-LEFT JOIN fct_orders_sql
-    ON order_items_prepared.order_id = fct_orders_sql.order_id;
+LEFT JOIN gold_fct_orders_sql
+    ON order_items_prepared.order_id = gold_fct_orders_sql.order_id;
 
-CREATE TEMP TABLE agg_sales_monthly_sql AS
+CREATE TEMP TABLE gold_agg_sales_monthly_sql AS
 SELECT
     purchase_year,
     purchase_month,
@@ -293,18 +258,18 @@ SELECT
             / SUM(CASE WHEN is_delivered_late IS NOT NULL THEN 1 ELSE 0 END)
         )
     END AS otd_rate
-FROM fct_orders_sql
+FROM gold_fct_orders_sql
 GROUP BY purchase_year, purchase_month, purchase_year_month;
 """
 
 
-ANALYTICS_QUERIES = {
-    "dim_customers": "SELECT * FROM dim_customers_sql",
-    "dim_products": "SELECT * FROM dim_products_sql",
-    "dim_sellers": "SELECT * FROM dim_sellers_sql",
-    "fct_orders": "SELECT * FROM fct_orders_sql",
-    "fct_order_items": "SELECT * FROM fct_order_items_sql",
-    "agg_sales_monthly": "SELECT * FROM agg_sales_monthly_sql",
+GOLD_QUERIES = {
+    "gold_dim_customers": "SELECT * FROM gold_dim_customers_sql",
+    "gold_dim_products": "SELECT * FROM gold_dim_products_sql",
+    "gold_dim_sellers": "SELECT * FROM gold_dim_sellers_sql",
+    "gold_fct_orders": "SELECT * FROM gold_fct_orders_sql",
+    "gold_fct_order_items": "SELECT * FROM gold_fct_order_items_sql",
+    "gold_agg_sales_monthly": "SELECT * FROM gold_agg_sales_monthly_sql",
 }
 
 
@@ -322,9 +287,21 @@ CREATE INDEX idx_sellers_seller_id ON sellers(seller_id);
 CREATE INDEX idx_sellers_zip ON sellers(seller_zip_code_prefix);
 CREATE INDEX idx_products_product_id ON products(product_id);
 CREATE INDEX idx_products_category ON products(product_category_name);
-CREATE INDEX idx_translation_category ON translation(product_category_name);
-CREATE INDEX idx_geolocation_zip ON geolocation(geolocation_zip_code_prefix);
+CREATE INDEX idx_product_categories_category ON product_categories(product_category_name);
+CREATE INDEX idx_geolocations_zip ON geolocations(zip_code_prefix);
 """
+
+
+def _mode_or_first(series: pd.Series):
+    series = series.dropna()
+    if series.empty:
+        return pd.NA
+
+    mode = series.mode()
+    if not mode.empty:
+        return mode.iloc[0]
+
+    return series.iloc[0]
 
 
 def load_raw_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
@@ -337,7 +314,7 @@ def load_raw_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
     ]
     if missing_files:
         raise FileNotFoundError(
-            f"Arquivos obrigatórios não encontrados em {base_path}: {missing_files}"
+            f"Arquivos obrigatorios nao encontrados em {base_path}: {missing_files}"
         )
 
     tables = {
@@ -355,10 +332,67 @@ def load_raw_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
     return tables
 
 
-def _create_sql_connection(raw_tables: dict[str, pd.DataFrame]) -> sqlite3.Connection:
+def _prepare_bronze_tables(raw_tables: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    return {
+        f"bronze_{table_name}": dataframe.copy()
+        for table_name, dataframe in raw_tables.items()
+    }
+
+
+def _prepare_silver_tables(raw_tables: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    geolocations = (
+        raw_tables["geolocation"]
+        .groupby("geolocation_zip_code_prefix", as_index=False)
+        .agg(
+            latitude=("geolocation_lat", "mean"),
+            longitude=("geolocation_lng", "mean"),
+            city=("geolocation_city", _mode_or_first),
+            state=("geolocation_state", _mode_or_first),
+        )
+        .rename(columns={"geolocation_zip_code_prefix": "zip_code_prefix"})
+    )
+
+    geolocations["latitude"] = geolocations["latitude"].round(7)
+    geolocations["longitude"] = geolocations["longitude"].round(7)
+
+    product_categories = raw_tables["translation"].copy()
+    customers = raw_tables["customers"].copy()
+    sellers = raw_tables["sellers"].copy()
+    products = raw_tables["products"].copy()
+    orders = raw_tables["orders"].copy()
+    order_items = raw_tables["order_items"].copy()
+    order_payments = raw_tables["order_payments"].copy()
+    order_reviews = raw_tables["order_reviews"].copy()
+
+    order_items["price"] = order_items["price"].round(2)
+    order_items["freight_value"] = order_items["freight_value"].round(2)
+    order_payments["payment_value"] = order_payments["payment_value"].round(2)
+
+    return {
+        "silver_geolocations": geolocations,
+        "silver_product_categories": product_categories,
+        "silver_customers": customers,
+        "silver_sellers": sellers,
+        "silver_products": products,
+        "silver_orders": orders,
+        "silver_order_items": order_items,
+        "silver_order_payments": order_payments,
+        "silver_order_reviews": order_reviews,
+    }
+
+
+def build_bronze_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
+    return _prepare_bronze_tables(load_raw_tables(entry_path))
+
+
+def build_silver_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
+    return _prepare_silver_tables(load_raw_tables(entry_path))
+
+
+def _create_sql_connection(sql_tables: dict[str, pd.DataFrame]) -> sqlite3.Connection:
     connection = sqlite3.connect(":memory:")
 
-    for table_name, dataframe in raw_tables.items():
+    for table_name, dataframe in sql_tables.items():
         dataframe.to_sql(table_name, connection, index=False, if_exists="replace")
 
     connection.executescript(SQL_INDEX_SCRIPT)
@@ -368,59 +402,141 @@ def _create_sql_connection(raw_tables: dict[str, pd.DataFrame]) -> sqlite3.Conne
 
 def _load_sql_model(connection: sqlite3.Connection, table_name: str) -> pd.DataFrame:
     dataframe = pd.read_sql_query(
-        ANALYTICS_QUERIES[table_name],
+        GOLD_QUERIES[table_name],
         connection,
-        parse_dates=ANALYTICS_PARSE_DATES.get(table_name, None),
+        parse_dates=GOLD_PARSE_DATES.get(table_name, None),
     )
 
-    for column in ANALYTICS_BOOL_COLUMNS.get(table_name, []):
+    for column in GOLD_BOOL_COLUMNS.get(table_name, []):
         dataframe[column] = dataframe[column].astype("boolean")
 
     return dataframe
 
 
-def build_analytics_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
-    raw_tables = load_raw_tables(entry_path)
+def _prepare_gold_tables(silver_tables: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    sql_tables = {
+        table_name.removeprefix("silver_"): dataframe
+        for table_name, dataframe in silver_tables.items()
+    }
 
-    with _create_sql_connection(raw_tables) as connection:
-        analytics_tables = {
+    with _create_sql_connection(sql_tables) as connection:
+        return {
             table_name: _load_sql_model(connection, table_name)
-            for table_name in ANALYTICS_QUERIES
+            for table_name in GOLD_QUERIES
         }
 
-    tables = {f"raw_{name}": dataframe for name, dataframe in raw_tables.items()}
-    tables.update(analytics_tables)
+
+def build_gold_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
+    raw_tables = load_raw_tables(entry_path)
+    silver_tables = _prepare_silver_tables(raw_tables)
+    return _prepare_gold_tables(silver_tables)
+
+
+def build_elt_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
+    raw_tables = load_raw_tables(entry_path)
+    bronze_tables = _prepare_bronze_tables(raw_tables)
+    silver_tables = _prepare_silver_tables(raw_tables)
+    gold_tables = _prepare_gold_tables(silver_tables)
+
+    tables = {}
+    tables.update(bronze_tables)
+    tables.update(silver_tables)
+    tables.update(gold_tables)
 
     return tables
+
+
+def build_analytics_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
+    return build_gold_tables(entry_path)
+
+
+def build_3nf_tables(entry_path: str = paths.ENTRADA) -> dict[str, pd.DataFrame]:
+    silver_tables = build_silver_tables(entry_path)
+    return {
+        table_name.removeprefix("silver_"): dataframe
+        for table_name, dataframe in silver_tables.items()
+    }
 
 
 def get_relationships() -> dict[str, dict[str, tuple[str, str]]]:
     return TABLE_RELATIONSHIPS
 
 
-def load_mysql_tables(tables: dict[str, pd.DataFrame], if_exists: str = "replace") -> None:
+def create_mysql_layered_schema() -> None:
     engine = get_mysql_engine()
 
     with engine.begin() as connection:
-        for table_name, dataframe in tables.items():
-            dataframe.to_sql(
-                table_name,
+        create_layered_schema(connection)
+
+
+def create_mysql_3nf_schema() -> None:
+    create_mysql_layered_schema()
+
+
+def load_mysql_elt_tables(
+    entry_path: str = paths.ENTRADA,
+    batch_size: int = 1000,
+) -> dict[str, pd.DataFrame]:
+    tables = build_elt_tables(entry_path)
+    engine = get_mysql_engine()
+
+    with engine.begin() as connection:
+        create_layered_schema(connection)
+        clear_layered_tables(connection)
+
+        for table_name in LAYER_TABLE_ORDER:
+            load_dataframe(
                 connection,
-                index=False,
-                if_exists=if_exists,
-                chunksize=1000,
-                method="multi",
+                table_name,
+                tables[table_name],
+                batch_size=batch_size,
             )
+
+    return tables
+
+
+def load_mysql_3nf_tables(
+    entry_path: str = paths.ENTRADA,
+    batch_size: int = 1000,
+) -> dict[str, pd.DataFrame]:
+    raw_tables = load_raw_tables(entry_path)
+    bronze_tables = _prepare_bronze_tables(raw_tables)
+    silver_tables = _prepare_silver_tables(raw_tables)
+    engine = get_mysql_engine()
+
+    with engine.begin() as connection:
+        create_layered_schema(connection)
+        clear_layered_tables(connection)
+
+        for table_name in BRONZE_TABLE_ORDER:
+            load_dataframe(
+                connection,
+                table_name,
+                bronze_tables[table_name],
+                batch_size=batch_size,
+            )
+
+        for table_name in SILVER_TABLE_ORDER:
+            load_dataframe(
+                connection,
+                table_name,
+                silver_tables[table_name],
+                batch_size=batch_size,
+            )
+
+    return {
+        table_name.removeprefix("silver_"): dataframe
+        for table_name, dataframe in silver_tables.items()
+    }
 
 
 def principal(
     entry_path: str = paths.ENTRADA,
     persist_mysql: bool = False,
-    if_exists: str = "replace",
+    batch_size: int = 1000,
 ) -> dict[str, pd.DataFrame]:
-    tables = build_analytics_tables(entry_path)
-
     if persist_mysql:
-        load_mysql_tables(tables, if_exists=if_exists)
+        tables = load_mysql_elt_tables(entry_path, batch_size=batch_size)
+        return {table_name: tables[table_name] for table_name in GOLD_TABLE_ORDER}
 
-    return tables
+    return build_gold_tables(entry_path)
