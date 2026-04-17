@@ -35,6 +35,11 @@ Hoje o projeto trabalha com um desenho enxuto de ELT:
 
 As transformacoes principais sao feitas em SQL em memoria, o que reduz a quantidade de `merge` manuais em pandas e deixa a logica mais proxima de um fluxo relacional real.
 
+O SQL do projeto fica externalizado em arquivos:
+
+- `sql/transform.sql` para a transformacao Gold
+- `sql/ddl/bronze.sql`, `sql/ddl/silver.sql` e `sql/ddl/gold.sql` para o schema MySQL
+
 ## Estrutura do Projeto
 
 ```text
@@ -42,13 +47,28 @@ Sales_pipe/
 |-- core/
 |   |-- database.py
 |   |-- getters.py
+|   |-- logging_config.py
 |   |-- mysql_schema.py
+|   |-- validators.py
 |   `-- paths.py
 |-- pipe/
 |   `-- sales.py
+|-- sql/
+|   |-- transform.sql
+|   `-- ddl/
+|       |-- bronze.sql
+|       |-- silver.sql
+|       `-- gold.sql
 |-- data/
 |   |-- entry/
 |   `-- exit/
+|-- conftest.py
+|-- docker-compose.yml
+|-- main.py
+|-- requirements.txt
+|-- test_gold.py
+|-- test_silver.py
+|-- test_validators.py
 |-- Analise.ipynb
 |-- Anotacoes.md
 |-- .env
@@ -165,6 +185,7 @@ O projeto ja possui:
 - criacao das tabelas Bronze, Silver e Gold
 - tipagem definida no schema
 - carga full refresh controlada para evitar duplicacao em novas execucoes
+- DDL separado por camada em arquivos SQL
 
 As variaveis ficam em [`.env`](/C:/Users/ramon/OneDrive/Desktop/estudos/Data_analysis/Sales_pipe/.env):
 
@@ -205,6 +226,36 @@ from pipe.sales import principal
 gold_tables = principal(persist_mysql=True)
 ```
 
+Executar a pipeline via CLI:
+
+```bash
+python main.py
+python main.py --persist-mysql
+python main.py --log-level DEBUG
+```
+
+Subir MySQL e Metabase localmente:
+
+```bash
+docker-compose up -d
+```
+
+## Qualidade e Operacao
+
+O projeto agora tambem possui:
+
+- validacoes leves entre as camadas em `core/validators.py`
+- configuracao central de logging em `core/logging_config.py`
+- testes unitarios para Silver, Gold e validadores
+- entrypoint de linha de comando em `main.py`
+- stack local com `docker-compose` para MySQL e Metabase
+
+Os testes principais podem ser executados com:
+
+```bash
+pytest -q test_silver.py test_gold.py test_validators.py
+```
+
 ## Pontos Fortes
 
 - Mantem o projeto orientado a Analytics Engineering, sem estrutura pesada demais.
@@ -213,15 +264,15 @@ gold_tables = principal(persist_mysql=True)
 - Ja separa dados em `bronze`, `silver` e `gold`.
 - Ja esta preparado para persistencia em MySQL.
 - Ja produz camada final adequada para BI.
+- Ja possui validacoes basicas e testes automatizados.
+- Ja possui SQL e DDL externalizados, o que facilita manutencao.
 
 ## Pontos de Melhoria
 
-- Separar as queries SQL da pipe em arquivos `.sql`.
-- Adicionar testes de qualidade de dados entre as camadas.
-- Criar uma rotina unica de execucao da pipeline.
 - Refinar estrategia de carga incremental quando o projeto evoluir.
 - Documentar melhor cada tabela final para uso no Metabase.
-- Adicionar `docker-compose` para MySQL + Metabase.
+- Ampliar as validacoes para integridade referencial e regras de negocio.
+- Parametrizar melhor o `docker-compose` para ambientes diferentes.
 
 ## Direcao do Projeto
 

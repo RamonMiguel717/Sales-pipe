@@ -1,5 +1,9 @@
-ENTRADA = r'data\entry'
-BASE_TRATAMENTO = r'data\entry\intermediario'
-FINAL = r'data\exit'
+from pathlib import Path
 
-API = r'https://olinda.bcb.gov.br/olinda/servico/TaxaJuros/versao/v1/odata/TaxasJurosMensalPorMes'
+
+BASE = Path(__file__).resolve().parent.parent
+ENTRADA = BASE / "data" / "entry"
+BASE_TRATAMENTO = ENTRADA / "intermediario"
+FINAL = BASE / "data" / "exit"
+
+API = "https://olinda.bcb.gov.br/olinda/servico/TaxaJuros/versao/v1/odata/TaxasJurosMensalPorMes"

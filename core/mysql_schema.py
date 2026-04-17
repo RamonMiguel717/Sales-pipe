@@ -1,8 +1,11 @@
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+
+from core import paths
 
 
 BRONZE_TABLE_ORDER = [
@@ -43,6 +46,13 @@ GOLD_TABLE_ORDER = [
 
 LAYER_TABLE_ORDER = BRONZE_TABLE_ORDER + SILVER_TABLE_ORDER + GOLD_TABLE_ORDER
 LAYER_DELETE_ORDER = list(reversed(LAYER_TABLE_ORDER))
+
+
+DDL_FILE_ORDER = [
+    paths.BASE / "sql" / "ddl" / "bronze.sql",
+    paths.BASE / "sql" / "ddl" / "silver.sql",
+    paths.BASE / "sql" / "ddl" / "gold.sql",
+]
 
 
 TABLE_COLUMNS = {
@@ -298,404 +308,6 @@ TABLE_COLUMNS = {
 }
 
 
-TABLE_DDL = {
-    "bronze_customers": """
-        CREATE TABLE IF NOT EXISTS bronze_customers (
-            customer_id CHAR(32) NOT NULL,
-            customer_unique_id CHAR(32) NOT NULL,
-            customer_zip_code_prefix INT UNSIGNED NULL,
-            customer_city VARCHAR(100) NULL,
-            customer_state CHAR(2) NULL,
-            PRIMARY KEY (customer_id),
-            KEY idx_bronze_customers_unique_id (customer_unique_id),
-            KEY idx_bronze_customers_zip (customer_zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_geolocation": """
-        CREATE TABLE IF NOT EXISTS bronze_geolocation (
-            bronze_geolocation_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            geolocation_zip_code_prefix INT UNSIGNED NULL,
-            geolocation_lat DECIMAL(10,7) NULL,
-            geolocation_lng DECIMAL(10,7) NULL,
-            geolocation_city VARCHAR(100) NULL,
-            geolocation_state CHAR(2) NULL,
-            PRIMARY KEY (bronze_geolocation_id),
-            KEY idx_bronze_geolocation_zip (geolocation_zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_orders": """
-        CREATE TABLE IF NOT EXISTS bronze_orders (
-            order_id CHAR(32) NOT NULL,
-            customer_id CHAR(32) NOT NULL,
-            order_status VARCHAR(32) NULL,
-            order_purchase_timestamp DATETIME NULL,
-            order_approved_at DATETIME NULL,
-            order_delivered_carrier_date DATETIME NULL,
-            order_delivered_customer_date DATETIME NULL,
-            order_estimated_delivery_date DATETIME NULL,
-            PRIMARY KEY (order_id),
-            KEY idx_bronze_orders_customer (customer_id),
-            KEY idx_bronze_orders_purchase (order_purchase_timestamp)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_order_items": """
-        CREATE TABLE IF NOT EXISTS bronze_order_items (
-            order_id CHAR(32) NOT NULL,
-            order_item_id INT UNSIGNED NOT NULL,
-            product_id CHAR(32) NOT NULL,
-            seller_id CHAR(32) NOT NULL,
-            shipping_limit_date DATETIME NULL,
-            price DECIMAL(14,2) NOT NULL,
-            freight_value DECIMAL(14,2) NOT NULL,
-            PRIMARY KEY (order_id, order_item_id),
-            KEY idx_bronze_order_items_product (product_id),
-            KEY idx_bronze_order_items_seller (seller_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_order_payments": """
-        CREATE TABLE IF NOT EXISTS bronze_order_payments (
-            order_id CHAR(32) NOT NULL,
-            payment_sequential INT UNSIGNED NOT NULL,
-            payment_type VARCHAR(32) NULL,
-            payment_installments INT UNSIGNED NULL,
-            payment_value DECIMAL(14,2) NOT NULL,
-            PRIMARY KEY (order_id, payment_sequential),
-            KEY idx_bronze_order_payments_order (order_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_order_reviews": """
-        CREATE TABLE IF NOT EXISTS bronze_order_reviews (
-            review_id CHAR(32) NOT NULL,
-            order_id CHAR(32) NOT NULL,
-            review_score TINYINT UNSIGNED NULL,
-            review_comment_title VARCHAR(255) NULL,
-            review_comment_message TEXT NULL,
-            review_creation_date DATETIME NULL,
-            review_answer_timestamp DATETIME NULL,
-            PRIMARY KEY (review_id, order_id),
-            KEY idx_bronze_order_reviews_order (order_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_products": """
-        CREATE TABLE IF NOT EXISTS bronze_products (
-            product_id CHAR(32) NOT NULL,
-            product_category_name VARCHAR(150) NULL,
-            product_name_lenght INT NULL,
-            product_description_lenght INT NULL,
-            product_photos_qty INT NULL,
-            product_weight_g INT NULL,
-            product_length_cm INT NULL,
-            product_height_cm INT NULL,
-            product_width_cm INT NULL,
-            PRIMARY KEY (product_id),
-            KEY idx_bronze_products_category (product_category_name)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_sellers": """
-        CREATE TABLE IF NOT EXISTS bronze_sellers (
-            seller_id CHAR(32) NOT NULL,
-            seller_zip_code_prefix INT UNSIGNED NULL,
-            seller_city VARCHAR(100) NULL,
-            seller_state CHAR(2) NULL,
-            PRIMARY KEY (seller_id),
-            KEY idx_bronze_sellers_zip (seller_zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "bronze_translation": """
-        CREATE TABLE IF NOT EXISTS bronze_translation (
-            product_category_name VARCHAR(150) NOT NULL,
-            product_category_name_english VARCHAR(150) NULL,
-            PRIMARY KEY (product_category_name)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_geolocations": """
-        CREATE TABLE IF NOT EXISTS silver_geolocations (
-            zip_code_prefix INT UNSIGNED NOT NULL,
-            city VARCHAR(100) NULL,
-            state CHAR(2) NULL,
-            latitude DECIMAL(10,7) NULL,
-            longitude DECIMAL(10,7) NULL,
-            PRIMARY KEY (zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_product_categories": """
-        CREATE TABLE IF NOT EXISTS silver_product_categories (
-            product_category_name VARCHAR(150) NOT NULL,
-            product_category_name_english VARCHAR(150) NULL,
-            PRIMARY KEY (product_category_name)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_customers": """
-        CREATE TABLE IF NOT EXISTS silver_customers (
-            customer_id CHAR(32) NOT NULL,
-            customer_unique_id CHAR(32) NOT NULL,
-            customer_zip_code_prefix INT UNSIGNED NULL,
-            customer_city VARCHAR(100) NULL,
-            customer_state CHAR(2) NULL,
-            PRIMARY KEY (customer_id),
-            KEY idx_silver_customers_unique_id (customer_unique_id),
-            KEY idx_silver_customers_zip (customer_zip_code_prefix),
-            CONSTRAINT fk_silver_customers_geolocations
-                FOREIGN KEY (customer_zip_code_prefix)
-                REFERENCES silver_geolocations(zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_sellers": """
-        CREATE TABLE IF NOT EXISTS silver_sellers (
-            seller_id CHAR(32) NOT NULL,
-            seller_zip_code_prefix INT UNSIGNED NULL,
-            seller_city VARCHAR(100) NULL,
-            seller_state CHAR(2) NULL,
-            PRIMARY KEY (seller_id),
-            KEY idx_silver_sellers_zip (seller_zip_code_prefix),
-            CONSTRAINT fk_silver_sellers_geolocations
-                FOREIGN KEY (seller_zip_code_prefix)
-                REFERENCES silver_geolocations(zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_products": """
-        CREATE TABLE IF NOT EXISTS silver_products (
-            product_id CHAR(32) NOT NULL,
-            product_category_name VARCHAR(150) NULL,
-            product_name_lenght INT NULL,
-            product_description_lenght INT NULL,
-            product_photos_qty INT NULL,
-            product_weight_g INT NULL,
-            product_length_cm INT NULL,
-            product_height_cm INT NULL,
-            product_width_cm INT NULL,
-            PRIMARY KEY (product_id),
-            KEY idx_silver_products_category (product_category_name),
-            CONSTRAINT fk_silver_products_categories
-                FOREIGN KEY (product_category_name)
-                REFERENCES silver_product_categories(product_category_name)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_orders": """
-        CREATE TABLE IF NOT EXISTS silver_orders (
-            order_id CHAR(32) NOT NULL,
-            customer_id CHAR(32) NOT NULL,
-            order_status VARCHAR(32) NULL,
-            order_purchase_timestamp DATETIME NULL,
-            order_approved_at DATETIME NULL,
-            order_delivered_carrier_date DATETIME NULL,
-            order_delivered_customer_date DATETIME NULL,
-            order_estimated_delivery_date DATETIME NULL,
-            PRIMARY KEY (order_id),
-            KEY idx_silver_orders_customer (customer_id),
-            KEY idx_silver_orders_purchase (order_purchase_timestamp),
-            CONSTRAINT fk_silver_orders_customers
-                FOREIGN KEY (customer_id)
-                REFERENCES silver_customers(customer_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_order_items": """
-        CREATE TABLE IF NOT EXISTS silver_order_items (
-            order_id CHAR(32) NOT NULL,
-            order_item_id INT UNSIGNED NOT NULL,
-            product_id CHAR(32) NOT NULL,
-            seller_id CHAR(32) NOT NULL,
-            shipping_limit_date DATETIME NULL,
-            price DECIMAL(14,2) NOT NULL,
-            freight_value DECIMAL(14,2) NOT NULL,
-            PRIMARY KEY (order_id, order_item_id),
-            KEY idx_silver_order_items_product (product_id),
-            KEY idx_silver_order_items_seller (seller_id),
-            CONSTRAINT fk_silver_order_items_orders
-                FOREIGN KEY (order_id)
-                REFERENCES silver_orders(order_id),
-            CONSTRAINT fk_silver_order_items_products
-                FOREIGN KEY (product_id)
-                REFERENCES silver_products(product_id),
-            CONSTRAINT fk_silver_order_items_sellers
-                FOREIGN KEY (seller_id)
-                REFERENCES silver_sellers(seller_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_order_payments": """
-        CREATE TABLE IF NOT EXISTS silver_order_payments (
-            order_id CHAR(32) NOT NULL,
-            payment_sequential INT UNSIGNED NOT NULL,
-            payment_type VARCHAR(32) NULL,
-            payment_installments INT UNSIGNED NULL,
-            payment_value DECIMAL(14,2) NOT NULL,
-            PRIMARY KEY (order_id, payment_sequential),
-            CONSTRAINT fk_silver_order_payments_orders
-                FOREIGN KEY (order_id)
-                REFERENCES silver_orders(order_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "silver_order_reviews": """
-        CREATE TABLE IF NOT EXISTS silver_order_reviews (
-            review_id CHAR(32) NOT NULL,
-            order_id CHAR(32) NOT NULL,
-            review_score TINYINT UNSIGNED NULL,
-            review_comment_title VARCHAR(255) NULL,
-            review_comment_message TEXT NULL,
-            review_creation_date DATETIME NULL,
-            review_answer_timestamp DATETIME NULL,
-            PRIMARY KEY (review_id, order_id),
-            KEY idx_silver_order_reviews_order (order_id),
-            CONSTRAINT fk_silver_order_reviews_orders
-                FOREIGN KEY (order_id)
-                REFERENCES silver_orders(order_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "gold_dim_customers": """
-        CREATE TABLE IF NOT EXISTS gold_dim_customers (
-            customer_id CHAR(32) NOT NULL,
-            customer_unique_id CHAR(32) NOT NULL,
-            customer_zip_code_prefix INT UNSIGNED NULL,
-            customer_city VARCHAR(100) NULL,
-            customer_state CHAR(2) NULL,
-            customer_lat DECIMAL(10,7) NULL,
-            customer_lng DECIMAL(10,7) NULL,
-            customer_geo_city VARCHAR(100) NULL,
-            customer_geo_state CHAR(2) NULL,
-            PRIMARY KEY (customer_id),
-            KEY idx_gold_dim_customers_unique_id (customer_unique_id),
-            KEY idx_gold_dim_customers_zip (customer_zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "gold_dim_products": """
-        CREATE TABLE IF NOT EXISTS gold_dim_products (
-            product_id CHAR(32) NOT NULL,
-            product_category_name VARCHAR(150) NULL,
-            product_name_lenght INT NULL,
-            product_description_lenght INT NULL,
-            product_photos_qty INT NULL,
-            product_weight_g INT NULL,
-            product_length_cm INT NULL,
-            product_height_cm INT NULL,
-            product_width_cm INT NULL,
-            product_category_name_english VARCHAR(150) NULL,
-            PRIMARY KEY (product_id),
-            KEY idx_gold_dim_products_category (product_category_name)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "gold_dim_sellers": """
-        CREATE TABLE IF NOT EXISTS gold_dim_sellers (
-            seller_id CHAR(32) NOT NULL,
-            seller_zip_code_prefix INT UNSIGNED NULL,
-            seller_city VARCHAR(100) NULL,
-            seller_state CHAR(2) NULL,
-            seller_lat DECIMAL(10,7) NULL,
-            seller_lng DECIMAL(10,7) NULL,
-            seller_geo_city VARCHAR(100) NULL,
-            seller_geo_state CHAR(2) NULL,
-            PRIMARY KEY (seller_id),
-            KEY idx_gold_dim_sellers_zip (seller_zip_code_prefix)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "gold_fct_orders": """
-        CREATE TABLE IF NOT EXISTS gold_fct_orders (
-            order_id CHAR(32) NOT NULL,
-            customer_id CHAR(32) NOT NULL,
-            order_status VARCHAR(32) NULL,
-            order_purchase_timestamp DATETIME NULL,
-            order_approved_at DATETIME NULL,
-            order_delivered_carrier_date DATETIME NULL,
-            order_delivered_customer_date DATETIME NULL,
-            order_estimated_delivery_date DATETIME NULL,
-            items_count INT UNSIGNED NULL,
-            products_count INT UNSIGNED NULL,
-            sellers_count INT UNSIGNED NULL,
-            items_value DECIMAL(14,2) NULL,
-            freight_value DECIMAL(14,2) NULL,
-            order_total_value DECIMAL(14,2) NULL,
-            payment_value_total DECIMAL(14,2) NULL,
-            payment_sequential_max INT UNSIGNED NULL,
-            payment_installments_max INT UNSIGNED NULL,
-            payment_installments_mean DECIMAL(12,4) NULL,
-            payment_types_nunique INT UNSIGNED NULL,
-            payment_type_main VARCHAR(32) NULL,
-            review_count INT UNSIGNED NULL,
-            review_score_mean DECIMAL(6,4) NULL,
-            review_score_min TINYINT UNSIGNED NULL,
-            review_score_max TINYINT UNSIGNED NULL,
-            has_review_comment BOOLEAN NULL,
-            approve_hours DECIMAL(12,4) NULL,
-            delivery_days DECIMAL(12,4) NULL,
-            carrier_to_customer_days DECIMAL(12,4) NULL,
-            estimated_delivery_days DECIMAL(12,4) NULL,
-            delivery_delay_days DECIMAL(12,4) NULL,
-            is_delivered_late BOOLEAN NULL,
-            purchase_year SMALLINT UNSIGNED NULL,
-            purchase_month TINYINT UNSIGNED NULL,
-            purchase_year_month CHAR(7) NULL,
-            PRIMARY KEY (order_id),
-            KEY idx_gold_fct_orders_customer (customer_id),
-            KEY idx_gold_fct_orders_purchase (order_purchase_timestamp),
-            KEY idx_gold_fct_orders_year_month (purchase_year_month),
-            CONSTRAINT fk_gold_fct_orders_customers
-                FOREIGN KEY (customer_id)
-                REFERENCES gold_dim_customers(customer_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "gold_fct_order_items": """
-        CREATE TABLE IF NOT EXISTS gold_fct_order_items (
-            order_id CHAR(32) NOT NULL,
-            order_item_id INT UNSIGNED NOT NULL,
-            product_id CHAR(32) NOT NULL,
-            seller_id CHAR(32) NOT NULL,
-            shipping_limit_date DATETIME NULL,
-            price DECIMAL(14,2) NOT NULL,
-            freight_value DECIMAL(14,2) NOT NULL,
-            item_total_value DECIMAL(14,2) NOT NULL,
-            customer_id CHAR(32) NOT NULL,
-            order_status VARCHAR(32) NULL,
-            order_purchase_timestamp DATETIME NULL,
-            order_delivered_carrier_date DATETIME NULL,
-            order_delivered_customer_date DATETIME NULL,
-            order_estimated_delivery_date DATETIME NULL,
-            purchase_year SMALLINT UNSIGNED NULL,
-            purchase_month TINYINT UNSIGNED NULL,
-            purchase_year_month CHAR(7) NULL,
-            delivery_days DECIMAL(12,4) NULL,
-            delivery_delay_days DECIMAL(12,4) NULL,
-            is_delivered_late BOOLEAN NULL,
-            shipping_accuracy_days DECIMAL(12,4) NULL,
-            PRIMARY KEY (order_id, order_item_id),
-            KEY idx_gold_fct_order_items_product (product_id),
-            KEY idx_gold_fct_order_items_seller (seller_id),
-            KEY idx_gold_fct_order_items_customer (customer_id),
-            KEY idx_gold_fct_order_items_year_month (purchase_year_month),
-            CONSTRAINT fk_gold_fct_order_items_customers
-                FOREIGN KEY (customer_id)
-                REFERENCES gold_dim_customers(customer_id),
-            CONSTRAINT fk_gold_fct_order_items_products
-                FOREIGN KEY (product_id)
-                REFERENCES gold_dim_products(product_id),
-            CONSTRAINT fk_gold_fct_order_items_sellers
-                FOREIGN KEY (seller_id)
-                REFERENCES gold_dim_sellers(seller_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-    "gold_agg_sales_monthly": """
-        CREATE TABLE IF NOT EXISTS gold_agg_sales_monthly (
-            purchase_year SMALLINT UNSIGNED NOT NULL,
-            purchase_month TINYINT UNSIGNED NOT NULL,
-            purchase_year_month CHAR(7) NOT NULL,
-            orders_count INT UNSIGNED NULL,
-            customers_count INT UNSIGNED NULL,
-            revenue_total DECIMAL(14,2) NULL,
-            payment_total DECIMAL(14,2) NULL,
-            freight_total DECIMAL(14,2) NULL,
-            avg_ticket DECIMAL(14,2) NULL,
-            avg_freight DECIMAL(14,2) NULL,
-            avg_delivery_days DECIMAL(12,4) NULL,
-            avg_review_score DECIMAL(6,4) NULL,
-            delivered_orders INT UNSIGNED NULL,
-            late_orders INT UNSIGNED NULL,
-            otd_rate DECIMAL(8,6) NULL,
-            PRIMARY KEY (purchase_year_month),
-            KEY idx_gold_agg_sales_monthly_year (purchase_year),
-            KEY idx_gold_agg_sales_monthly_month (purchase_month)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """,
-}
-
-
 def _normalize_value(value: Any) -> Any:
     if pd.isna(value):
         return None
@@ -712,14 +324,27 @@ def _normalize_value(value: Any) -> Any:
     return value
 
 
+def _read_sql_statements(file_path: Path) -> list[str]:
+    if not file_path.exists():
+        raise FileNotFoundError(f"Arquivo DDL nao encontrado: {file_path}")
+
+    sql_content = file_path.read_text(encoding="utf-8")
+    return [
+        statement.strip()
+        for statement in sql_content.split(";")
+        if statement.strip()
+    ]
+
+
 def create_layered_schema(connection: Connection) -> None:
-    for table_name in LAYER_TABLE_ORDER:
-        connection.execute(text(TABLE_DDL[table_name]))
+    for file_path in DDL_FILE_ORDER:
+        for statement in _read_sql_statements(file_path):
+            connection.exec_driver_sql(statement)
 
 
 def clear_layered_tables(connection: Connection) -> None:
     for table_name in LAYER_DELETE_ORDER:
-        connection.execute(text(f"DELETE FROM `{table_name}`"))
+        connection.exec_driver_sql(f"DELETE FROM `{table_name}`")
 
 
 def load_dataframe(
@@ -732,9 +357,10 @@ def load_dataframe(
     ordered_dataframe = dataframe.loc[:, columns]
     columns_sql = ", ".join(f"`{column}`" for column in columns)
     values_sql = ", ".join(f":{column}" for column in columns)
-    statement = text(
+    statement = (
         f"INSERT INTO `{table_name}` ({columns_sql}) VALUES ({values_sql})"
     )
+    compiled_statement = text(statement)
 
     for start in range(0, len(ordered_dataframe), batch_size):
         chunk = ordered_dataframe.iloc[start:start + batch_size]
@@ -744,4 +370,4 @@ def load_dataframe(
         ]
 
         if records:
-            connection.execute(statement, records)
+            connection.execute(compiled_statement, records)

@@ -1,0 +1,33 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sales_pipe}
+      MYSQL_USER: ${MYSQL_USER:-sales_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-sales_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  metabase:
+    image: metabase/metabase:latest
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    volumes:
+      - metabase_data:/metabase-data
+
+volumes:
+  mysql_data:
+  metabase_data:
