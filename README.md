@@ -240,6 +240,10 @@ Subir MySQL e Metabase localmente:
 docker-compose up -d
 ```
 
+Credenciais e configuracao local do Metabase:
+
+- ver `Metabase_Acesso.md`
+
 ## Qualidade e Operacao
 
 O projeto agora tambem possui:

@@ -196,15 +196,74 @@ def _prepare_silver_tables(
     geolocations["latitude"] = geolocations["latitude"].round(7)
     geolocations["longitude"] = geolocations["longitude"].round(7)
 
+    zip_fallbacks = pd.concat(
+        [
+            raw_tables["customers"][
+                ["customer_zip_code_prefix", "customer_city", "customer_state"]
+            ].rename(
+                columns={
+                    "customer_zip_code_prefix": "zip_code_prefix",
+                    "customer_city": "city",
+                    "customer_state": "state",
+                }
+            ),
+            raw_tables["sellers"][
+                ["seller_zip_code_prefix", "seller_city", "seller_state"]
+            ].rename(
+                columns={
+                    "seller_zip_code_prefix": "zip_code_prefix",
+                    "seller_city": "city",
+                    "seller_state": "state",
+                }
+            ),
+        ],
+        ignore_index=True,
+    ).dropna(subset=["zip_code_prefix"])
+
+    missing_zip_fallbacks = zip_fallbacks[
+        ~zip_fallbacks["zip_code_prefix"].isin(geolocations["zip_code_prefix"])
+    ]
+
+    if not missing_zip_fallbacks.empty:
+        fallback_geolocations = missing_zip_fallbacks.groupby(
+            "zip_code_prefix", as_index=False
+        ).agg(
+            city=("city", _mode_or_first),
+            state=("state", _mode_or_first),
+        )
+        fallback_geolocations["latitude"] = float("nan")
+        fallback_geolocations["longitude"] = float("nan")
+        geolocations = pd.concat(
+            [geolocations, fallback_geolocations[geolocations.columns]],
+            ignore_index=True,
+        ).sort_values("zip_code_prefix", ignore_index=True)
+
     order_items = raw_tables["order_items"].copy()
     order_payments = raw_tables["order_payments"].copy()
     order_items["price"] = order_items["price"].round(2)
     order_items["freight_value"] = order_items["freight_value"].round(2)
     order_payments["payment_value"] = order_payments["payment_value"].round(2)
 
+    product_categories = raw_tables["translation"].copy()
+    missing_product_categories = raw_tables["products"][
+        ["product_category_name"]
+    ].dropna()
+    missing_product_categories = missing_product_categories[
+        ~missing_product_categories["product_category_name"].isin(
+            product_categories["product_category_name"]
+        )
+    ].drop_duplicates(ignore_index=True)
+
+    if not missing_product_categories.empty:
+        missing_product_categories["product_category_name_english"] = pd.NA
+        product_categories = pd.concat(
+            [product_categories, missing_product_categories],
+            ignore_index=True,
+        )
+
     silver_tables = {
         "silver_geolocations": geolocations,
-        "silver_product_categories": raw_tables["translation"].copy(),
+        "silver_product_categories": product_categories,
         "silver_customers": raw_tables["customers"].copy(),
         "silver_sellers": raw_tables["sellers"].copy(),
         "silver_products": raw_tables["products"].copy(),

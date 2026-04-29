@@ -59,6 +59,46 @@ class TestPrepareSilverTables:
         zip_1310 = geolocations[geolocations["zip_code_prefix"] == 1310].iloc[0]
         assert zip_1310["city"] == "sao paulo"
 
+    def test_missing_zip_prefixes_are_added_to_geolocations(
+        self,
+        raw_tables: dict[str, pd.DataFrame],
+    ) -> None:
+        raw_tables["customers"].loc[0, "customer_zip_code_prefix"] = 99999
+        raw_tables["customers"].loc[0, "customer_city"] = "cidade cliente"
+        raw_tables["customers"].loc[0, "customer_state"] = "SP"
+        raw_tables["sellers"].loc[0, "seller_zip_code_prefix"] = 88888
+        raw_tables["sellers"].loc[0, "seller_city"] = "cidade seller"
+        raw_tables["sellers"].loc[0, "seller_state"] = "RJ"
+
+        silver = _prepare_silver_tables(raw_tables)
+        geolocations = silver["silver_geolocations"].set_index("zip_code_prefix")
+
+        assert 99999 in geolocations.index
+        assert 88888 in geolocations.index
+        assert geolocations.loc[99999, "city"] == "cidade cliente"
+        assert geolocations.loc[88888, "state"] == "RJ"
+        assert pd.isna(geolocations.loc[99999, "latitude"])
+        assert pd.isna(geolocations.loc[88888, "longitude"])
+
+    def test_missing_product_categories_are_added_to_translation(
+        self,
+        raw_tables: dict[str, pd.DataFrame],
+    ) -> None:
+        raw_tables["products"].loc[0, "product_category_name"] = "categoria_sem_traducao"
+
+        silver = _prepare_silver_tables(raw_tables)
+        categories = silver["silver_product_categories"].set_index(
+            "product_category_name"
+        )
+
+        assert "categoria_sem_traducao" in categories.index
+        assert pd.isna(
+            categories.loc[
+                "categoria_sem_traducao",
+                "product_category_name_english",
+            ]
+        )
+
     def test_monetary_values_are_rounded(self, raw_tables: dict[str, pd.DataFrame]) -> None:
         silver = _prepare_silver_tables(raw_tables)
         order_items = silver["silver_order_items"]
